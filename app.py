@@ -66,7 +66,7 @@ def webhook():
             send_message(chat_id, f"💰 سود/ضرر کل: {profit:,.0f} ریال")
 
         else:
-            send_message(chat_id, "لطفاً 'سلام' یا قیمت روز دلار به ریال را وارد کنید.")
+            send_message(chat_id, "لطفاً 'سلام' یا قیمت روز طلا به ریال را وارد کنید.")
 
     return "ok"
 
@@ -76,3 +76,4 @@ def webhook():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
