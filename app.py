@@ -1,32 +1,43 @@
 from flask import Flask, request
 import requests
 import os
+from bs4 import BeautifulSoup
 
-# گرفتن متغیرهای محیطی
+# گرفتن متغیر محیطی توکن
 TOKEN = os.environ.get("BOT_TOKEN")
-BRS_API_KEY = os.environ.get("BRS_API_KEY")
-
 URL = f"https://api.telegram.org/bot{TOKEN}/"
 
 app = Flask(__name__)
-@app.route("/test")
-def test_connection():
-    try:
-        r = requests.get("https://www.tala.ir/", timeout=10)
-        return f"Status Code: {r.status_code}"
-    except Exception as e:
-        return f"Error: {str(e)}"
+
 # داده‌های پوزیشن‌ها
 weights = [40.457, 104.81, 65.494, 48.54]
 buy_prices = [7197000, 14310000, 15273000, 15842000]
 
 
-# ارسال پیام به تلگرام
-def send_message(chat_id, text):
-    requests.post(URL + "sendMessage", json={
-        "chat_id": chat_id,
-        "text": text
-    })
+# گرفتن قیمت طلای ۱۸ از tala.ir
+def get_gold_price():
+    headers = {
+        "User-Agent": "Mozilla/5.0"
+    }
+
+    try:
+        response = requests.get("https://www.tala.ir/", headers=headers, timeout=10)
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        gold_div = soup.find("div", id="geram18")
+        if not gold_div:
+            return None
+
+        price_span = gold_div.find("span", class_="price")
+        if not price_span:
+            return None
+
+        price_text = price_span.text.replace(",", "").strip()
+        return int(price_text)
+
+    except Exception as e:
+        print("Scraping Error:", e)
+        return None
 
 
 # محاسبه سود و ارزش کل
@@ -44,36 +55,24 @@ def calculate_profit_and_value(current_price):
     return total_profit, total_value
 
 
-# گرفتن قیمت‌ها از API
-def get_market_prices():
-    url = f"https://BrsApi.ir/Api/Market/Market_CGCC.php?key={BRS_API_KEY}"
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        "Accept": "application/json"
-    }
-
-    try:
-        response = requests.get(url, headers=headers, timeout=10)
-
-        if response.status_code == 200:
-            data = response.json()
-
-            dollar = int(data["dollar"]["price"])
-            gold_18 = int(data["gold18"]["price"])
-            ounce = int(data["ounce"]["price"])
-
-            return dollar, gold_18, ounce
-        else:
-            return None, None, None
-
-    except Exception:
-        return None, None, None
+# ارسال پیام به تلگرام
+def send_message(chat_id, text):
+    requests.post(URL + "sendMessage", json={
+        "chat_id": chat_id,
+        "text": text
+    })
 
 
 @app.route("/", methods=["GET"])
 def home():
     return "Bot is running!"
+
+
+# تست گرفتن قیمت مستقیم
+@app.route("/gold")
+def gold():
+    price = get_gold_price()
+    return str(price)
 
 
 @app.route("/webhook", methods=["POST"])
@@ -88,23 +87,21 @@ def webhook():
         if text == "سلام":
             send_message(chat_id, "سلام 👋")
 
-        # دستور گرفتن قیمت از API
+        # گرفتن قیمت از سایت
         elif text == "قیمت":
-            dollar, gold_18, ounce = get_market_prices()
+            gold_18 = get_gold_price()
 
             if gold_18:
                 profit, total_value = calculate_profit_and_value(gold_18)
 
                 send_message(
                     chat_id,
-                    f"💵 دلار: {dollar:,} ریال\n"
-                    f"🌍 انس جهانی: {ounce:,} دلار\n"
                     f"🥇 طلای ۱۸ عیار: {gold_18:,} ریال\n\n"
                     f"💰 سود/ضرر کل: {profit:,.0f} ریال\n"
                     f"📊 ارزش کل دارایی: {total_value:,.0f} ریال"
                 )
             else:
-                send_message(chat_id, "❌ خطا در دریافت قیمت‌ها از سرور")
+                send_message(chat_id, "❌ خطا در دریافت قیمت طلا از سایت")
 
         # اگر کاربر خودش قیمت وارد کند
         elif text.replace(",", "").isdigit():
@@ -127,4 +124,3 @@ def webhook():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
-
