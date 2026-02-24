@@ -9,7 +9,13 @@ BRS_API_KEY = os.environ.get("BRS_API_KEY")
 URL = f"https://api.telegram.org/bot{TOKEN}/"
 
 app = Flask(__name__)
-
+@app.route("/test")
+def test_connection():
+    try:
+        r = requests.get("https://www.tala.ir/", timeout=10)
+        return f"Status Code: {r.status_code}"
+    except Exception as e:
+        return f"Error: {str(e)}"
 # داده‌های پوزیشن‌ها
 weights = [40.457, 104.81, 65.494, 48.54]
 buy_prices = [7197000, 14310000, 15273000, 15842000]
@@ -121,3 +127,4 @@ def webhook():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
+
