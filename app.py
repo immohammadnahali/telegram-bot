@@ -3,7 +3,8 @@ import requests
 import os
 import time
 from datetime import datetime
-
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 TOKEN = os.environ.get("BOT_TOKEN")
 NAVASAN_API_KEY = os.environ.get("NAVASAN_API_KEY")
@@ -52,7 +53,7 @@ def get_market_prices():
             gold_price = int(gold_price)
             usd_price = int(usd_price)
 
-            update_time = datetime.now().strftime("%H:%M")
+            update_time = datetime.now(ZoneInfo("Asia/Tehran")).strftime("%H:%M")
 
             cache_data["gold"] = gold_price
             cache_data["usd"] = usd_price
@@ -190,4 +191,5 @@ def webhook():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
+
 
