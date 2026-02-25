@@ -2,7 +2,6 @@ from flask import Flask, request
 import requests
 import os
 
-# گرفتن متغیر محیطی
 TOKEN = os.environ.get("BOT_TOKEN")
 NAVASAN_API_KEY = os.environ.get("NAVASAN_API_KEY")
 
@@ -10,12 +9,10 @@ URL = f"https://api.telegram.org/bot{TOKEN}/"
 
 app = Flask(__name__)
 
-# داده‌های پوزیشن‌ها
 weights = [40.457, 104.81, 65.494, 48.54]
 buy_prices = [7197000, 14310000, 15273000, 15842000]
 
 
-# گرفتن قیمت طلای ۱۸ از navasan API
 def get_gold_price():
     try:
         url = f"https://api.navasan.tech/latest/?api_key={NAVASAN_API_KEY}"
@@ -34,7 +31,6 @@ def get_gold_price():
         return None
 
 
-# محاسبه سود و ارزش کل
 def calculate_profit_and_value(current_price):
     total_profit = 0
     total_value = 0
@@ -49,7 +45,6 @@ def calculate_profit_and_value(current_price):
     return total_profit, total_value
 
 
-# ارسال پیام به تلگرام
 def send_message(chat_id, text):
     requests.post(URL + "sendMessage", json={
         "chat_id": chat_id,
@@ -62,7 +57,6 @@ def home():
     return "Bot is running!"
 
 
-# تست گرفتن قیمت مستقیم
 @app.route("/gold")
 def gold():
     price = get_gold_price()
@@ -77,10 +71,26 @@ def webhook():
         chat_id = data["message"]["chat"]["id"]
         text = data["message"].get("text", "")
 
-        if text == "سلام":
-            send_message(chat_id, "سلام 👋")
+        # start
+        if text == "/start":
+            send_message(
+                chat_id,
+                "👋 خوش آمدید\n\n"
+                "دستورات ربات:\n"
+                "/price - نمایش قیمت و سود\n"
+                "/gold - نمایش فقط قیمت طلا"
+            )
 
-        elif text == "قیمت":
+        # فقط قیمت طلا
+        elif text == "/gold":
+            gold_18 = get_gold_price()
+            if gold_18:
+                send_message(chat_id, f"🥇 طلای ۱۸ عیار: {gold_18:,} ریال")
+            else:
+                send_message(chat_id, "❌ خطا در دریافت قیمت")
+
+        # قیمت + سود
+        elif text in ["قیمت", "/price"]:
             gold_18 = get_gold_price()
 
             if gold_18:
@@ -95,6 +105,7 @@ def webhook():
             else:
                 send_message(chat_id, "❌ خطا در دریافت قیمت طلا از API")
 
+        # ورود دستی قیمت
         elif text.replace(",", "").isdigit():
             current_price = int(text.replace(",", ""))
             profit, total_value = calculate_profit_and_value(current_price)
@@ -106,7 +117,7 @@ def webhook():
             )
 
         else:
-            send_message(chat_id, "دستور نامعتبر است.\nبرای دریافت قیمت بنویس: قیمت")
+            send_message(chat_id, "دستور نامعتبر است.\nبرای دریافت قیمت بنویس: /price")
 
     return "ok"
 
