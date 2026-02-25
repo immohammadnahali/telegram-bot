@@ -1,10 +1,11 @@
 from flask import Flask, request
 import requests
 import os
-from bs4 import BeautifulSoup
 
-# گرفتن متغیر محیطی توکن
+# گرفتن متغیر محیطی
 TOKEN = os.environ.get("BOT_TOKEN")
+NAVASAN_API_KEY = os.environ.get("NAVASAN_API_KEY")
+
 URL = f"https://api.telegram.org/bot{TOKEN}/"
 
 app = Flask(__name__)
@@ -14,29 +15,22 @@ weights = [40.457, 104.81, 65.494, 48.54]
 buy_prices = [7197000, 14310000, 15273000, 15842000]
 
 
-# گرفتن قیمت طلای ۱۸ از tala.ir
+# گرفتن قیمت طلای ۱۸ از navasan API
 def get_gold_price():
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
-
     try:
-        response = requests.get("https://www.tala.ir/", headers=headers, timeout=10)
-        soup = BeautifulSoup(response.text, "html.parser")
+        url = f"https://api.navasan.tech/latest/?api_key={NAVASAN_API_KEY}"
+        response = requests.get(url, timeout=10)
+        data = response.json()
 
-        gold_div = soup.find("div", id="geram18")
-        if not gold_div:
-            return None
+        gold_price = data.get("18ayar", {}).get("value")
 
-        price_span = gold_div.find("span", class_="price")
-        if not price_span:
-            return None
+        if gold_price:
+            return int(gold_price)
 
-        price_text = price_span.text.replace(",", "").strip()
-        return int(price_text)
+        return None
 
     except Exception as e:
-        print("Scraping Error:", e)
+        print("API Error:", e)
         return None
 
 
@@ -83,11 +77,9 @@ def webhook():
         chat_id = data["message"]["chat"]["id"]
         text = data["message"].get("text", "")
 
-        # سلام
         if text == "سلام":
             send_message(chat_id, "سلام 👋")
 
-        # گرفتن قیمت از سایت
         elif text == "قیمت":
             gold_18 = get_gold_price()
 
@@ -101,12 +93,10 @@ def webhook():
                     f"📊 ارزش کل دارایی: {total_value:,.0f} ریال"
                 )
             else:
-                send_message(chat_id, "❌ خطا در دریافت قیمت طلا از سایت")
+                send_message(chat_id, "❌ خطا در دریافت قیمت طلا از API")
 
-        # اگر کاربر خودش قیمت وارد کند
         elif text.replace(",", "").isdigit():
             current_price = int(text.replace(",", ""))
-
             profit, total_value = calculate_profit_and_value(current_price)
 
             send_message(
