@@ -102,11 +102,16 @@ def calculate_profit_and_value(current_price):
     return total_profit, total_value
 
 
-def send_message(chat_id, text):
-    requests.post(URL + "sendMessage", json={
+def send_message(chat_id, text, keyboard=None):
+    payload = {
         "chat_id": chat_id,
         "text": text
-    })
+    }
+
+    if keyboard:
+        payload["reply_markup"] = keyboard
+
+    requests.post(URL + "sendMessage", json=payload)
 
 
 @app.route("/", methods=["GET"])
@@ -119,30 +124,79 @@ def gold():
     price = get_gold_price()
     return str(price)
 
+        # webhook
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
 
+    # -------------------
+    # هندل دکمه‌های شیشه‌ای
+    # -------------------
+    if "callback_query" in data:
+        callback = data["callback_query"]
+        chat_id = callback["message"]["chat"]["id"]
+        data_value = callback["data"]
+
+        # جلوگیری از لودینگ بی‌نهایت دکمه
+        requests.post(URL + "answerCallbackQuery", json={
+            "callback_query_id": callback["id"]
+        })
+
+        gold_18, usd_price, updated_at = get_market_prices()
+
+        if not gold_18:
+            send_message(chat_id, "❌ خطا در دریافت قیمت")
+            return "ok"
+
+        if data_value == "gold":
+            send_message(
+                chat_id,
+                f"🥇 طلای ۱۸ عیار: {gold_18:,} ریال\n"
+                f"💵 دلار: {usd_price:,} ریال\n\n"
+                f"⏱ آخرین بروزرسانی: {updated_at}"
+            )
+
+        elif data_value == "price":
+            profit, total_value = calculate_profit_and_value(gold_18)
+
+            send_message(
+                chat_id,
+                f"🥇 طلای ۱۸ عیار: {gold_18:,} ریال\n"
+                f"💵 دلار: {usd_price:,} ریال\n\n"
+                f"💰 سود/ضرر کل: {profit:,.0f} ریال\n"
+                f"📊 ارزش کل دارایی: {total_value:,.0f} ریال\n\n"
+                f"⏱ آخرین بروزرسانی: {updated_at}"
+            )
+
+        return "ok"
+
+    # -------------------
+    # هندل پیام‌های معمولی
+    # -------------------
     if "message" in data:
         chat_id = data["message"]["chat"]["id"]
         text = data["message"].get("text", "")
 
-        # start
         if text == "/start":
+            keyboard = {
+                "inline_keyboard": [
+                    [
+                        {"text": "📊 قیمت و سود", "callback_data": "price"},
+                        {"text": "🥇 قیمت طلا", "callback_data": "gold"}
+                    ]
+                ]
+            }
+
             send_message(
                 chat_id,
-                "👋 خوش آمدید\n\n"
-                "دستورات ربات:\n"
-                "/price - نمایش قیمت و سود\n"
-                "/gold - نمایش فقط قیمت طلا و دلار"
+                "👋 خوش آمدید\nیکی از گزینه‌ها را انتخاب کنید:",
+                keyboard
             )
-
-        # فقط قیمت طلا
 
         elif text == "/gold":
             gold_18, usd_price, updated_at = get_market_prices()
-        
+
             if gold_18:
                 send_message(
                     chat_id,
@@ -151,9 +205,8 @@ def webhook():
                     f"⏱ آخرین بروزرسانی: {updated_at}"
                 )
             else:
-                send_message(chat_id, "❌ خطا در دریافت قیمت")        
+                send_message(chat_id, "❌ خطا در دریافت قیمت")
 
-        # قیمت + سود
         elif text in ["قیمت", "/price"]:
             gold_18, usd_price, updated_at = get_market_prices()
 
@@ -169,9 +222,8 @@ def webhook():
                     f"⏱ آخرین بروزرسانی: {updated_at}"
                 )
             else:
-                send_message(chat_id, "❌ خطا در دریافت قیمت طلا از API")
+                send_message(chat_id, "❌ خطا در دریافت قیمت")
 
-        # ورود دستی قیمت
         elif text.replace(",", "").isdigit():
             current_price = int(text.replace(",", ""))
             profit, total_value = calculate_profit_and_value(current_price)
@@ -187,9 +239,9 @@ def webhook():
 
     return "ok"
 
-
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
+
 
 
