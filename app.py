@@ -3,7 +3,6 @@ import requests
 import os
 import time
 from datetime import datetime
-from datetime import datetime
 from zoneinfo import ZoneInfo
 
 TOKEN = os.environ.get("BOT_TOKEN")
@@ -23,23 +22,17 @@ cache_data = {
     "timestamp": 0,
     "updated_at": ""
 }
+CACHE_DURATION = 3600  # 1 ساعت
 
-CACHE_DURATION = 3600  # 1 ساعت (به ثانیه)
-
-from datetime import datetime
-
+# ----------------------
+# دریافت قیمت از API
+# ----------------------
 def get_market_prices():
     global cache_data
-
     current_time = time.time()
 
-    # اگر کش معتبر است
     if current_time - cache_data["timestamp"] < CACHE_DURATION:
-        return (
-            cache_data["gold"],
-            cache_data["usd"],
-            cache_data["updated_at"]
-        )
+        return cache_data["gold"], cache_data["usd"], cache_data["updated_at"]
 
     try:
         url = f"https://api.navasan.tech/latest/?api_key={NAVASAN_API_KEY}"
@@ -52,196 +45,141 @@ def get_market_prices():
         if gold_price and usd_price:
             gold_price = int(gold_price)
             usd_price = int(usd_price)
+            updated_at = datetime.now(ZoneInfo("Asia/Tehran")).strftime("%H:%M")
 
-            update_time = datetime.now(ZoneInfo("Asia/Tehran")).strftime("%H:%M")
-
-            cache_data["gold"] = gold_price
-            cache_data["usd"] = usd_price
-            cache_data["timestamp"] = current_time
-            cache_data["updated_at"] = update_time
-
-            return gold_price, usd_price, update_time
-
+            cache_data.update({
+                "gold": gold_price,
+                "usd": usd_price,
+                "timestamp": current_time,
+                "updated_at": updated_at
+            })
+            return gold_price, usd_price, updated_at
         return None, None, None
-
     except Exception as e:
         print("API Error:", e)
         return None, None, None
 
-
-
-def get_gold_price():
-    try:
-        url = f"https://api.navasan.tech/latest/?api_key={NAVASAN_API_KEY}"
-        response = requests.get(url, timeout=10)
-        data = response.json()
-
-        gold_price = data.get("18ayar", {}).get("value")
-
-        if gold_price:
-            return int(gold_price)
-
-        return None
-
-    except Exception as e:
-        print("API Error:", e)
-        return None
-
-
+# ----------------------
+# محاسبه سود و ارزش کل
+# ----------------------
 def calculate_profit_and_value(current_price):
-    total_profit = 0
-    total_value = 0
-
-    for weight, buy_price in zip(weights, buy_prices):
-        profit = (current_price - buy_price) * weight
-        value = current_price * weight
-
-        total_profit += profit
-        total_value += value
-
+    total_profit = sum((current_price - bp) * w for bp, w in zip(buy_prices, weights))
+    total_value = sum(current_price * w for w in weights)
     return total_profit, total_value
 
-
-def send_message(chat_id, text, keyboard=None):
-    payload = {
-        "chat_id": chat_id,
-        "text": text
+# ----------------------
+# کیبورد اصلی
+# ----------------------
+def main_keyboard():
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "📊 قیمت و سود", "callback_data": "price"},
+                {"text": "🥇 قیمت طلا", "callback_data": "gold"}
+            ]
+        ]
     }
 
+# ----------------------
+# ارسال یا ویرایش پیام
+# ----------------------
+def send_message(chat_id, text, keyboard=None, message_id=None):
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML"
+    }
     if keyboard:
         payload["reply_markup"] = keyboard
 
-    requests.post(URL + "sendMessage", json=payload)
+    if message_id:
+        # ویرایش پیام قبلی
+        requests.post(URL + "editMessageText", json={**payload, "message_id": message_id})
+    else:
+        # ارسال پیام جدید
+        requests.post(URL + "sendMessage", json=payload)
 
-
+# ----------------------
+# روت تست
+# ----------------------
 @app.route("/", methods=["GET"])
 def home():
     return "Bot is running!"
 
-
 @app.route("/gold")
 def gold():
-    price = get_gold_price()
+    price = get_market_prices()[0]
     return str(price)
 
-        # webhook
-
+# ----------------------
+# webhook
+# ----------------------
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
 
     # -------------------
-    # هندل دکمه‌های شیشه‌ای
+    # هندل دکمه‌ها
     # -------------------
     if "callback_query" in data:
         callback = data["callback_query"]
         chat_id = callback["message"]["chat"]["id"]
+        message_id = callback["message"]["message_id"]
         data_value = callback["data"]
 
         # جلوگیری از لودینگ بی‌نهایت دکمه
-        requests.post(URL + "answerCallbackQuery", json={
-            "callback_query_id": callback["id"]
-        })
+        requests.post(URL + "answerCallbackQuery", json={"callback_query_id": callback["id"]})
 
         gold_18, usd_price, updated_at = get_market_prices()
-
         if not gold_18:
-            send_message(chat_id, "❌ خطا در دریافت قیمت")
+            send_message(chat_id, "❌ خطا در دریافت قیمت", main_keyboard(), message_id)
             return "ok"
 
         if data_value == "gold":
             send_message(
                 chat_id,
-                f"🥇 طلای ۱۸ عیار: {gold_18:,} ریال\n"
-                f"💵 دلار: {usd_price:,} ریال\n\n"
-                f"⏱ آخرین بروزرسانی: {updated_at}"
+                f"🥇 طلای ۱۸ عیار: {gold_18:,} ریال\n💵 دلار: {usd_price:,} ریال\n⏱ آخرین بروزرسانی: {updated_at}",
+                main_keyboard(),
+                message_id
             )
-
         elif data_value == "price":
             profit, total_value = calculate_profit_and_value(gold_18)
-
             send_message(
                 chat_id,
-                f"🥇 طلای ۱۸ عیار: {gold_18:,} ریال\n"
-                f"💵 دلار: {usd_price:,} ریال\n\n"
-                f"💰 سود/ضرر کل: {profit:,.0f} ریال\n"
-                f"📊 ارزش کل دارایی: {total_value:,.0f} ریال\n\n"
-                f"⏱ آخرین بروزرسانی: {updated_at}"
+                f"🥇 طلای ۱۸ عیار: {gold_18:,} ریال\n💵 دلار: {usd_price:,} ریال\n💰 سود/ضرر کل: {profit:,.0f} ریال\n📊 ارزش کل دارایی: {total_value:,.0f} ریال\n⏱ آخرین بروزرسانی: {updated_at}",
+                main_keyboard(),
+                message_id
             )
-
         return "ok"
 
     # -------------------
-    # هندل پیام‌های معمولی
+    # هندل پیام متنی
     # -------------------
     if "message" in data:
         chat_id = data["message"]["chat"]["id"]
         text = data["message"].get("text", "")
+        message_id = data["message"]["message_id"]
+
+        gold_18, usd_price, updated_at = get_market_prices()
 
         if text == "/start":
-            keyboard = {
-                "inline_keyboard": [
-                    [
-                        {"text": "📊 قیمت و سود", "callback_data": "price"},
-                        {"text": "🥇 قیمت طلا", "callback_data": "gold"}
-                    ]
-                ]
-            }
-
-            send_message(
-                chat_id,
-                "👋 خوش آمدید\nیکی از گزینه‌ها را انتخاب کنید:",
-                keyboard
-            )
-
+            send_message(chat_id, "👋 خوش آمدید\nیکی از گزینه‌ها را انتخاب کنید:", main_keyboard())
         elif text == "/gold":
-            gold_18, usd_price, updated_at = get_market_prices()
-
             if gold_18:
-                send_message(
-                    chat_id,
-                    f"🥇 طلای ۱۸ عیار: {gold_18:,} ریال\n"
-                    f"💵 دلار: {usd_price:,} ریال\n\n"
-                    f"⏱ آخرین بروزرسانی: {updated_at}"
-                )
+                send_message(chat_id, f"🥇 طلای ۱۸ عیار: {gold_18:,} ریال\n💵 دلار: {usd_price:,} ریال\n⏱ آخرین بروزرسانی: {updated_at}", main_keyboard())
             else:
-                send_message(chat_id, "❌ خطا در دریافت قیمت")
-
-        elif text in ["قیمت", "/price"]:
-            gold_18, usd_price, updated_at = get_market_prices()
-
+                send_message(chat_id, "❌ خطا در دریافت قیمت", main_keyboard())
+        elif text in ["/price", "قیمت"]:
             if gold_18:
                 profit, total_value = calculate_profit_and_value(gold_18)
-
-                send_message(
-                    chat_id,
-                    f"🥇 طلای ۱۸ عیار: {gold_18:,} ریال\n"
-                    f"💵 دلار: {usd_price:,} ریال\n\n"
-                    f"💰 سود/ضرر کل: {profit:,.0f} ریال\n"
-                    f"📊 ارزش کل دارایی: {total_value:,.0f} ریال\n\n"
-                    f"⏱ آخرین بروزرسانی: {updated_at}"
-                )
+                send_message(chat_id, f"🥇 طلای ۱۸ عیار: {gold_18:,} ریال\n💵 دلار: {usd_price:,} ریال\n💰 سود/ضرر کل: {profit:,.0f} ریال\n📊 ارزش کل دارایی: {total_value:,.0f} ریال\n⏱ آخرین بروزرسانی: {updated_at}", main_keyboard())
             else:
-                send_message(chat_id, "❌ خطا در دریافت قیمت")
-
+                send_message(chat_id, "❌ خطا در دریافت قیمت", main_keyboard())
         elif text.replace(",", "").isdigit():
             current_price = int(text.replace(",", ""))
             profit, total_value = calculate_profit_and_value(current_price)
-
-            send_message(
-                chat_id,
-                f"💰 سود/ضرر کل: {profit:,.0f} ریال\n"
-                f"📊 ارزش کل دارایی: {total_value:,.0f} ریال"
-            )
-
+            send_message(chat_id, f"💰 سود/ضرر کل: {profit:,.0f} ریال\n📊 ارزش کل دارایی: {total_value:,.0f} ریال", main_keyboard())
         else:
-            send_message(chat_id, "دستور نامعتبر است.\nبرای دریافت قیمت بنویس: /price")
+            send_message(chat_id, "دستور نامعتبر است.\nبرای دریافت قیمت بنویس: /price", main_keyboard())
 
     return "ok"
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
-
-
-
