@@ -4,9 +4,23 @@ import os
 import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
+import threading
+
 
 TOKEN = os.environ.get("BOT_TOKEN")
-NAVASAN_API_KEY = os.environ.get("NAVASAN_API_KEY")
+NAVASAN_API_KEYS = [
+    os.environ.get("NAVASAN_API_KEY_1"),
+    os.environ.get("NAVASAN_API_KEY_2"),
+]
+
+current_api_index = 0
+api_lock = threading.Lock()
+
+# برای موقتاً خارج کردن API خراب
+api_disabled_until = {}  # {index: timestamp}
+API_DISABLE_DURATION = 3600  # 1 ساعت غیرفعال بشه اگر کوتا تموم کرد
+
+
 
 URL = f"https://api.telegram.org/bot{TOKEN}/"
 
@@ -28,36 +42,70 @@ CACHE_DURATION = 3600  # 1 ساعت
 # دریافت قیمت از API
 # ----------------------
 def get_market_prices():
-    global cache_data
+    global cache_data, current_api_index
+
     current_time = time.time()
 
+    # ---------- CACHE ----------
     if current_time - cache_data["timestamp"] < CACHE_DURATION:
         return cache_data["gold"], cache_data["usd"], cache_data["updated_at"]
 
-    try:
-        url = f"https://api.navasan.tech/latest/?api_key={NAVASAN_API_KEY}"
-        response = requests.get(url, timeout=10)
-        data = response.json()
+    # ---------- API FAILOVER LOOP ----------
+    for _ in range(len(NAVASAN_API_KEYS)):
 
-        gold_price = data.get("18ayar", {}).get("value")
-        usd_price = data.get("usd_sell", {}).get("value")
+        with api_lock:
+            api_index = current_api_index
+            current_api_index = (current_api_index + 1) % len(NAVASAN_API_KEYS)
 
-        if gold_price and usd_price:
-            gold_price = int(gold_price)
-            usd_price = int(usd_price)
-            updated_at = datetime.now(ZoneInfo("Asia/Tehran")).strftime("%H:%M")
+        # اگر این API موقتاً غیرفعاله ردش کن
+        disabled_until = api_disabled_until.get(api_index)
+        if disabled_until and current_time < disabled_until:
+            continue
 
-            cache_data.update({
-                "gold": gold_price,
-                "usd": usd_price,
-                "timestamp": current_time,
-                "updated_at": updated_at
-            })
-            return gold_price, usd_price, updated_at
-        return None, None, None
-    except Exception as e:
-        print("API Error:", e)
-        return None, None, None
+        api_key = NAVASAN_API_KEYS[api_index]
+
+        try:
+            url = f"https://api.navasan.tech/latest/?api_key={api_key}"
+            response = requests.get(url, timeout=10)
+
+            # اگر quota تموم کرده
+            if response.status_code == 429:
+                print(f"API {api_index} quota exceeded. Disabling temporarily.")
+                api_disabled_until[api_index] = current_time + API_DISABLE_DURATION
+                continue
+
+            if response.status_code != 200:
+                print(f"API {api_index} returned status {response.status_code}")
+                continue
+
+            data = response.json()
+
+            gold_price = data.get("18ayar", {}).get("value")
+            usd_price = data.get("usd_sell", {}).get("value")
+
+            if gold_price and usd_price:
+                gold_price = int(gold_price)
+                usd_price = int(usd_price)
+                updated_at = datetime.now(
+                    ZoneInfo("Asia/Tehran")
+                ).strftime("%H:%M")
+
+                cache_data.update({
+                    "gold": gold_price,
+                    "usd": usd_price,
+                    "timestamp": current_time,
+                    "updated_at": updated_at
+                })
+
+                return gold_price, usd_price, updated_at
+
+        except Exception as e:
+            print(f"API {api_index} Error:", e)
+            continue
+
+    # ---------- اگر همه API ها شکست خوردن ----------
+    print("All APIs failed.")
+    return None, None, None
 
 # ----------------------
 # محاسبه سود و ارزش کل
@@ -183,3 +231,4 @@ def webhook():
             send_message(chat_id, "دستور نامعتبر است.\nبرای دریافت قیمت بنویس: /price", main_keyboard())
 
     return "ok"
+
